@@ -9,3 +9,5 @@ output.txt
 *.json
 .vscode/*
 *.sh
+venv/
+.venv/

@@ -1,5 +1,5 @@
 torch
-torchvison
+torchvision
 matplotlib
 tqdm
 numpy

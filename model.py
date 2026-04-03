@@ -7,8 +7,9 @@ Created on Tue Dec  11:00:00 2023
 
 import torch
 import torch.nn as nn
-from channel import Channel
 
+from channel import Channel
+from constellation import MICLayer
 
 """ def _image_normalization(norm_type):
     def _inner(tensor: torch.Tensor):
@@ -142,19 +143,107 @@ class _Decoder(nn.Module):
 
 
 class DeepJSCC(nn.Module):
-    def __init__(self, c, channel_type='AWGN', snr=None):
+    def __init__(self, c, channel_type='AWGN', snr=None, mapper_type='none', mapper_kwargs=None):
         super(DeepJSCC, self).__init__()
         self.encoder = _Encoder(c=c)
+        self.mapper = None
+        self.mapper_type = 'none'
+        self.set_mapper(mapper_type=mapper_type, mapper_kwargs=mapper_kwargs)
         if snr is not None:
             self.channel = Channel(channel_type, snr)
+        else:
+            self.channel = None
         self.decoder = _Decoder(c=c)
 
     def forward(self, x):
         z = self.encoder(x)
+        if self.mapper is not None:
+            z = self.mapper(z)
         if hasattr(self, 'channel') and self.channel is not None:
             z = self.channel(z)
         x_hat = self.decoder(z)
         return x_hat
+
+    def forward_debug(self, x, return_mapper_indices=False):
+        """Debug forward pass exposing pre/post mapper tensors and reconstruction."""
+        z_pre_mapper = self.encoder(x)
+
+        mapper_indices = None
+        if self.mapper is not None:
+            if return_mapper_indices:
+                z_post_mapper, mapper_indices = self.mapper(z_pre_mapper, return_indices=True)
+            else:
+                z_post_mapper = self.mapper(z_pre_mapper)
+        else:
+            z_post_mapper = z_pre_mapper
+
+        if hasattr(self, 'channel') and self.channel is not None:
+            z_after_channel = self.channel(z_post_mapper)
+        else:
+            z_after_channel = z_post_mapper
+
+        x_hat = self.decoder(z_after_channel)
+
+        out = {
+            'z_pre_mapper': z_pre_mapper,
+            'z_post_mapper': z_post_mapper,
+            'z_after_channel': z_after_channel,
+            'x_hat': x_hat,
+        }
+        if mapper_indices is not None:
+            out['mapper_indices'] = mapper_indices
+        return out
+
+    def set_mapper(self, mapper_type='none', mapper_kwargs=None):
+        mapper_kwargs = {} if mapper_kwargs is None else dict(mapper_kwargs)
+
+        if mapper_type is None or str(mapper_type).lower() == 'none':
+            self.disable_mapper()
+            return
+
+        mapper_type = str(mapper_type).lower()
+        if mapper_type == 'mic':
+            self.mapper = MICLayer(**mapper_kwargs)
+            self.mapper_type = 'mic'
+            return
+
+        raise ValueError('Unknown mapper type: {}'.format(mapper_type))
+
+    def disable_mapper(self):
+        self.mapper = None
+        self.mapper_type = 'none'
+
+    def set_mapper_deploy_mode(self, enabled=True):
+        if self.mapper is not None and hasattr(self.mapper, 'set_deploy_mode'):
+            self.mapper.set_deploy_mode(enabled)
+
+    def export_mapper_state(self, path, extra_metadata=None):
+        if self.mapper is None:
+            return None
+        if hasattr(self.mapper, 'export_constellation'):
+            return self.mapper.export_constellation(path, extra_metadata=extra_metadata)
+        return None
+
+    def get_mapper_stats(self):
+        if self.mapper is not None and hasattr(self.mapper, 'get_stats'):
+            return self.mapper.get_stats()
+        return {}
+
+    def get_mapper_config(self):
+        if self.mapper_type == 'none' or self.mapper is None:
+            return {'mapper_type': 'none'}
+
+        config = {
+            'mapper_type': self.mapper_type,
+            'constellation_size': getattr(self.mapper, 'constellation_size', None),
+            'clip_value': getattr(self.mapper, 'clip_value', None),
+            'temperature': getattr(self.mapper, 'temperature', None),
+            'delta': getattr(self.mapper, 'delta', None),
+            'hard_forward': getattr(self.mapper, 'hard_forward', None),
+            'train_mode': getattr(self.mapper, 'train_mode', None),
+            'power_constraint_mode': getattr(self.mapper, 'power_constraint_mode', None),
+        }
+        return config
 
     def change_channel(self, channel_type='AWGN', snr=None):
         if snr is None:
