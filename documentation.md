@@ -6,6 +6,28 @@ This document records all major changes and additions made to the Deep-JSCC-PyTo
 
 ---
 
+## Quick Reference: Files and Functions
+
+### New Files Added
+
+| File | Function |
+|------|----------|
+| **constellation.py** | Core MIC quantization engine: symbol pairing, nearest-neighbor mapping, codebook management, and power normalization. Handles training (with surrogate gradients) and deployment (hard quantization). |
+| **debug_mapper.py** | Unit tests for MIC integration: validates shape roundtrips, gradient flow, power constraints, device compatibility, and checkpoint serialization format. Sanity checks before training. |
+| **debug_mic_visualizer.py** | Interactive visualization tool: displays learned/estimated constellations with decision boundaries, centroids, and optional baseline comparison. Supports SNR override for decoder robustness testing. |
+| **test_mic_image_triplet.py** | Batch testing framework: generates 3-panel comparisons (input \| no-MIC output \| MIC output) with PSNR scores. Uses trained or estimated codebooks for flexible evaluation. |
+
+### Modified Files
+
+| File | Key Changes |
+|------|-------------|
+| **model.py** | Added encoder power normalization, Sigmoid output constraint, optional mapper insertion, and debug mode for activation inspection. |
+| **train.py** | Added CLI flags for MIC configuration (constellation size, surrogate mode, power constraint). Integrated separate optimizer groups for independent mapper learning rates. |
+| **eval.py** | Added mapper reconstruction from checkpoint metadata, hard-deploy-mode evaluation path, and mapper export workflows. |
+| **signal_constellation_visualizer.py** | Updated to handle new checkpoint format with mapper metadata and I/Q pairing visualization. |
+
+---
+
 ## Phase 1: Core MIC Implementation
 
 ### 1.1 New File: `constellation.py`
