@@ -41,10 +41,11 @@ def unwrap_model(model):
 
 
 def get_mapper_kwargs_from_params(params):
-    if params.get('mapper_type', 'none') == 'none':
+    mapper_type = str(params.get('mapper_type', 'none')).lower()
+    if mapper_type == 'none':
         return None
-    return {
-        'constellation_size': params['constellation_size'],
+
+    common = {
         'clip_value': params['mapper_clip_value'],
         'temperature': params['mic_temperature'],
         'delta': params['mic_delta'],
@@ -52,6 +53,17 @@ def get_mapper_kwargs_from_params(params):
         'train_mode': params['mic_train_mode'],
         'power_constraint_mode': params['power_constraint_mode'],
     }
+
+    if mapper_type == 'mic':
+        common['constellation_size'] = params['constellation_size']
+        return common
+
+    if mapper_type == 'mrc':
+        common['levels_per_axis'] = params['mrc_levels_per_axis']
+        common['init_bounds'] = params['mrc_init_bounds']
+        return common
+
+    raise ValueError('Unknown mapper_type: {}'.format(mapper_type))
 
 
 def extract_state_dict(checkpoint_obj):
@@ -110,7 +122,10 @@ def update_mapper_schedule(model, params, epoch):
         return
 
     model_ref = unwrap_model(model)
-    if model_ref.mapper is None or params.get('mapper_type', 'none') != 'mic':
+    if model_ref.mapper is None or params.get('mapper_type', 'none') == 'none':
+        return
+
+    if not (hasattr(model_ref.mapper, 'set_temperature') and hasattr(model_ref.mapper, 'set_delta')):
         return
 
     steps = max(params['epochs'] - 1, 1)
@@ -179,7 +194,7 @@ def finalize_mapper_stats(aggregated):
 
 def maybe_export_constellation(model, params, export_base_path, epoch=None):
     model_ref = unwrap_model(model)
-    if params.get('mapper_type', 'none') != 'mic' or model_ref.mapper is None:
+    if params.get('mapper_type', 'none') == 'none' or model_ref.mapper is None:
         return None
 
     suffix = '' if epoch is None else '_epoch_{}'.format(epoch)
@@ -190,7 +205,8 @@ def maybe_export_constellation(model, params, export_base_path, epoch=None):
         'ratio': params['ratio'],
         'channel': params['channel'],
         'mapper_type': params['mapper_type'],
-        'constellation_size': params['constellation_size'],
+        'constellation_size': getattr(model_ref.mapper, 'constellation_size', params.get('constellation_size', None)),
+        'levels_per_axis': getattr(model_ref.mapper, 'levels_per_axis', None),
         'power_constraint_mode': params['power_constraint_mode'],
     }
     return model_ref.export_mapper_state(export_path, extra_metadata=metadata)
@@ -268,7 +284,7 @@ def config_parser_pipeline():
                         choices=['AWGN', 'Rayleigh'], help='channel')
 
     parser.add_argument('--mapper_type', default='none', type=str,
-                        choices=['none', 'mic'], help='constellation mapper type')
+                        choices=['none', 'mic', 'mrc'], help='constellation mapper type')
     parser.add_argument('--constellation_size', default=16, type=int,
                         help='number of constellation points for MIC')
     parser.add_argument('--mic_temperature', default=0.1, type=float,
@@ -306,9 +322,9 @@ def config_parser_pipeline():
                         help='final delta when annealing')
 
     parser.add_argument('--mrc_levels_per_axis', default=4, type=int,
-                        help='reserved for future MRC support')
+                        help='number of levels per I/Q axis for regular MRC grid (constellation size = levels^2)')
     parser.add_argument('--mrc_init_bounds', default='', type=str,
-                        help='reserved for future MRC support')
+                        help="optional initial I/Q bounds for MRC grid, format 'low,high' (e.g. -1.5,1.5)")
 
     return parser.parse_args()
 
@@ -443,7 +459,8 @@ def train_pipeline(params):
         "{:.2f}".format(params['ratio']) + '_' + str(params['channel']) + \
         '_' + time.strftime('%Hh%Mm%Ss_on_%b_%d_%Y')
     if params['mapper_type'] != 'none':
-        phaser += '_{}_M{}'.format(params['mapper_type'].upper(), params['constellation_size'])
+        mapper_size = params['constellation_size'] if params['mapper_type'] == 'mic' else int(params['mrc_levels_per_axis']) ** 2
+        phaser += '_{}_M{}'.format(params['mapper_type'].upper(), mapper_size)
     params['phaser'] = phaser
     root_log_dir = out_dir + '/' + 'logs/' + phaser
     root_ckpt_dir = out_dir + '/' + 'checkpoints/' + phaser
@@ -470,7 +487,7 @@ def train_pipeline(params):
         print('Unexpected keys: {}'.format(load_result.unexpected_keys))
 
     model_ref = unwrap_model(model)
-    if model_ref.mapper is not None and params['mapper_type'] == 'mic':
+    if model_ref.mapper is not None and params['mapper_type'] in {'mic', 'mrc'}:
         model_ref.mapper.set_train_mode(params['mic_train_mode'])
         model_ref.mapper.hard_forward = params['mic_hard_forward']
         model_ref.mapper.set_temperature(params['mic_temperature'])
@@ -581,7 +598,7 @@ def train_pipeline(params):
     print("TOTAL TIME TAKEN: {:.4f}s".format(time.time() - t0))
     print("AVG TIME PER EPOCH: {:.4f}s".format(np.mean(per_epoch_time)))
 
-    if params.get('mapper_type', 'none') == 'mic':
+    if params.get('mapper_type', 'none') != 'none':
         if params.get('export_constellation_path'):
             export_base = os.path.join(params['export_constellation_path'], params['phaser'])
         else:

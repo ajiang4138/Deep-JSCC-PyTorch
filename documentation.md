@@ -13,9 +13,9 @@ This document records all major changes and additions made to the Deep-JSCC-PyTo
 | File | Function |
 |------|----------|
 | **constellation.py** | Core MIC quantization engine: symbol pairing, nearest-neighbor mapping, codebook management, and power normalization. Handles training (with surrogate gradients) and deployment (hard quantization). |
-| **debug_mapper.py** | Unit tests for MIC integration: validates shape roundtrips, gradient flow, power constraints, device compatibility, and checkpoint serialization format. Sanity checks before training. |
-| **debug_mic_visualizer.py** | Interactive visualization tool: displays learned/estimated constellations with decision boundaries, centroids, and optional baseline comparison. Supports SNR override for decoder robustness testing. |
-| **test_mic_image_triplet.py** | Batch testing framework: generates 3-panel comparisons (input \| no-MIC output \| MIC output) with PSNR scores. Uses trained or estimated codebooks for flexible evaluation. |
+| **mapper_debug_tests.py** | Unit tests for MIC integration: validates shape roundtrips, gradient flow, power constraints, device compatibility, and checkpoint serialization format. Sanity checks before training. |
+| **mic_mapper_visualizer.py** | Interactive visualization tool: displays learned/estimated constellations with decision boundaries, centroids, and optional baseline comparison. Supports SNR override for decoder robustness testing. |
+| **mic_image_triplet_test.py** | Batch testing framework: generates 3-panel comparisons (input \| no-MIC output \| MIC output) with PSNR scores. Uses trained or estimated codebooks for flexible evaluation. |
 
 ### Modified Files
 
@@ -25,6 +25,103 @@ This document records all major changes and additions made to the Deep-JSCC-PyTo
 | **train.py** | Added CLI flags for MIC configuration (constellation size, surrogate mode, power constraint). Integrated separate optimizer groups for independent mapper learning rates. |
 | **eval.py** | Added mapper reconstruction from checkpoint metadata, hard-deploy-mode evaluation path, and mapper export workflows. |
 | **signal_constellation_visualizer.py** | Updated to handle new checkpoint format with mapper metadata and I/Q pairing visualization. |
+
+## How to Use the Renamed Utility Files
+
+This section is a practical quick-start for the three renamed scripts:
+
+- `mapper_debug_tests.py`
+- `mic_mapper_visualizer.py`
+- `mic_image_triplet_test.py`
+
+### Prerequisites
+
+```bash
+cd /Users/ajiang4138/Documents/GitHub/Deep-JSCC-PyTorch
+source .venv/bin/activate
+```
+
+Use `--device cuda` only if CUDA is available; otherwise use `--device cpu`.
+
+### 1) `mapper_debug_tests.py` (sanity checks)
+
+Run all mapper sanity checks:
+
+```bash
+python mapper_debug_tests.py
+```
+
+Alternative with pytest:
+
+```bash
+pytest mapper_debug_tests.py
+```
+
+What this validates:
+- Pair/unpair symbol shape roundtrip
+- Gradient flow to encoder output and MIC codebook
+- Hard deploy output lands on codebook points
+- Codebook normalization behavior
+- CPU and (if available) GPU compatibility
+
+### 2) `mic_mapper_visualizer.py` (constellation debugging)
+
+#### Single-checkpoint mode
+
+```bash
+python mic_mapper_visualizer.py \
+  --checkpoint out/checkpoints/YOUR_RUN/epoch_999.pkl \
+  --input_image demo/kodim23.png \
+  --device cpu \
+  --output_dir out/debug_mic_visualizer_single
+```
+
+Optional knobs:
+- `--snr 19` to override checkpoint SNR
+- `--overlay_k 16` to control fallback center count when mapper/codebook is unavailable
+- `--resize_h` and `--resize_w` for deterministic input resizing
+
+#### Comparison mode (baseline vs MIC)
+
+```bash
+python mic_mapper_visualizer.py \
+  --baseline_checkpoint out/checkpoints/BASELINE_RUN/epoch_999.pkl \
+  --mic_checkpoint out/checkpoints/MIC_RUN/epoch_999.pkl \
+  --input_image demo/kodim23.png \
+  --device cpu \
+  --output_dir out/debug_mic_visualizer_compare
+```
+
+Mode selection rule:
+- Single mode: provide `--checkpoint`
+- Compare mode: provide both `--baseline_checkpoint` and `--mic_checkpoint`
+
+### 3) `mic_image_triplet_test.py` (input/no-MIC/with-MIC triplets)
+
+Generate triplets for one or more images:
+
+```bash
+python mic_image_triplet_test.py \
+  --checkpoint out/checkpoints/YOUR_MIC_RUN/epoch_999.pkl \
+  --images demo/kodim23.png demo/kodim08.png demo/4ksunset.jpg \
+  --device cpu \
+  --output_dir out/test_mic_triplet_example \
+  --prefer_trained_mapper \
+  --snr 19
+```
+
+If `--prefer_trained_mapper` is not set (or mapper is missing in checkpoint), the script estimates a codebook from latent symbols.
+
+Useful options:
+- `--mic_constellation_size 16` (used for estimated-codebook mode)
+- `--mic_clip_value 2.0`
+- `--mic_power_constraint_mode none|codebook|post_mapper`
+
+Expected outputs per image folder:
+- `triplet_input_no_mic_with_mic.png`
+- `x_hat_no_mic.npy`
+- `x_hat_mic.npy`
+- `summary.json` at the output root with run metadata
 
 ---
 
@@ -149,7 +246,7 @@ This document records all major changes and additions made to the Deep-JSCC-PyTo
   - Support for multi-checkpoint evaluation (sweep over multiple trained checkpoints)
   - Mapper export path configurable via CLI
 
-### 1.5 New File: `debug_mapper.py`
+### 1.5 New File: `mapper_debug_tests.py`
 
 **Purpose**: Unit-test-like sanity checks for MIC integration.
 
@@ -160,7 +257,7 @@ This document records all major changes and additions made to the Deep-JSCC-PyTo
 - Device compatibility: test CPU ↔ GPU transitions
 - Checkpoint format: verify mapper_config serialization and deserialization
 
-**Status**: Passing in virtual environment (`pytest debug_mapper.py`)
+**Status**: Passing in virtual environment (`pytest mapper_debug_tests.py`)
 
 ### 1.6 Modified File: `signal_constellation_visualizer.py`
 
@@ -174,7 +271,7 @@ This document records all major changes and additions made to the Deep-JSCC-PyTo
 
 ## Phase 2: Visualization and Debug Script
 
-### 2.1 New File: `debug_mic_visualizer.py`
+### 2.1 New File: `mic_mapper_visualizer.py`
 
 **Purpose**: Rich constellation visualization with optional baseline-vs-MIC comparison, decision region overlays, and centroid markers.
 
@@ -226,7 +323,7 @@ This document records all major changes and additions made to the Deep-JSCC-PyTo
 
 ## Phase 3: Overlay Robustness Enhancement
 
-### 3.1 Enhanced: `debug_mic_visualizer.py` Fallback Strategy
+### 3.1 Enhanced: `mic_mapper_visualizer.py` Fallback Strategy
 
 **Problem**: Visualization failed when checkpoint had no trained mapper (common for legacy models).
 
@@ -243,7 +340,7 @@ This document records all major changes and additions made to the Deep-JSCC-PyTo
 
 ## Phase 4: Comparative Test Framework
 
-### 4.1 New File: `test_mic_image_triplet.py`
+### 4.1 New File: `mic_image_triplet_test.py`
 
 **Purpose**: Generate 3-panel triplet comparisons showing input image, output without MIC, and output with MIC, including PSNR labels and metadata.
 
@@ -314,7 +411,7 @@ out/test_mic_triplet_CHECKPOINT_NAME/
 **Purpose**: Test decoder performance at arbitrary SNR values without retraining model.
 
 **Implementation**:
-- `--snr` flag in `debug_mic_visualizer.py` (line 113) and `test_mic_image_triplet.py`
+- `--snr` flag in `mic_mapper_visualizer.py` (line 113) and `mic_image_triplet_test.py`
 - Decouples test SNR from checkpoint's training SNR
 - Channel uses test SNR to compute noise power: $P_{\text{noise}} = P_{\text{signal}} / 10^{\text{SNR}/10}$
 
@@ -339,7 +436,7 @@ out/test_mic_triplet_CHECKPOINT_NAME/
 **Investigation Scope**:
 - Analyzed [channel.py](channel.py) noise model (lines 1-62)
 - Analyzed [model.py](model.py) encoder/decoder architecture (lines 1-190)
-- Analyzed [test_mic_image_triplet.py](test_mic_image_triplet.py) MIC test pipeline (lines 1-240)
+- Analyzed [mic_image_triplet_test.py](mic_image_triplet_test.py) MIC test pipeline (lines 1-240)
 
 ### 6.2 Root Cause Analysis
 

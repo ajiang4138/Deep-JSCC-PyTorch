@@ -53,9 +53,11 @@ def build_test_loader(dataset_name, params):
 
 
 def mapper_kwargs_from_dict(mapper_cfg, args):
-    if mapper_cfg.get('mapper_type', 'none') == 'none':
+    mapper_type = str(mapper_cfg.get('mapper_type', 'none')).lower()
+    if mapper_type == 'none':
         return None
-    return {
+
+    common = {
         'constellation_size': mapper_cfg.get('constellation_size', args.constellation_size),
         'clip_value': mapper_cfg.get('clip_value', args.mapper_clip_value),
         'temperature': mapper_cfg.get('temperature', args.mic_temperature),
@@ -65,11 +67,30 @@ def mapper_kwargs_from_dict(mapper_cfg, args):
         'power_constraint_mode': mapper_cfg.get('power_constraint_mode', args.power_constraint_mode),
     }
 
+    if mapper_type == 'mic':
+        return common
+
+    if mapper_type == 'mrc':
+        return {
+            'levels_per_axis': int(mapper_cfg.get('levels_per_axis', args.mrc_levels_per_axis)),
+            'init_bounds': mapper_cfg.get('init_bounds', args.mrc_init_bounds),
+            'clip_value': common['clip_value'],
+            'temperature': common['temperature'],
+            'delta': common['delta'],
+            'hard_forward': common['hard_forward'],
+            'train_mode': common['train_mode'],
+            'power_constraint_mode': common['power_constraint_mode'],
+        }
+
+    raise ValueError('Unknown mapper_type: {}'.format(mapper_type))
+
 
 def resolve_mapper_config(config_params, checkpoint_meta, args):
     mapper_cfg = {
         'mapper_type': config_params.get('mapper_type', 'none'),
         'constellation_size': config_params.get('constellation_size', args.constellation_size),
+        'levels_per_axis': config_params.get('mrc_levels_per_axis', args.mrc_levels_per_axis),
+        'init_bounds': config_params.get('mrc_init_bounds', args.mrc_init_bounds),
         'clip_value': config_params.get('mapper_clip_value', args.mapper_clip_value),
         'temperature': config_params.get('mic_temperature', args.mic_temperature),
         'delta': config_params.get('mic_delta', args.mic_delta),
@@ -83,6 +104,8 @@ def resolve_mapper_config(config_params, checkpoint_meta, args):
         mapper_cfg.update({
             'mapper_type': ckpt_params.get('mapper_type', mapper_cfg['mapper_type']),
             'constellation_size': ckpt_params.get('constellation_size', mapper_cfg['constellation_size']),
+            'levels_per_axis': ckpt_params.get('mrc_levels_per_axis', mapper_cfg['levels_per_axis']),
+            'init_bounds': ckpt_params.get('mrc_init_bounds', mapper_cfg['init_bounds']),
             'clip_value': ckpt_params.get('mapper_clip_value', mapper_cfg['clip_value']),
             'temperature': ckpt_params.get('mic_temperature', mapper_cfg['temperature']),
             'delta': ckpt_params.get('mic_delta', mapper_cfg['delta']),
@@ -96,6 +119,8 @@ def resolve_mapper_config(config_params, checkpoint_meta, args):
             mapper_cfg.update({
                 'mapper_type': mapper_ckpt.get('mapper_type', mapper_cfg['mapper_type']),
                 'constellation_size': mapper_ckpt.get('constellation_size', mapper_cfg['constellation_size']),
+                'levels_per_axis': mapper_ckpt.get('levels_per_axis', mapper_cfg['levels_per_axis']),
+                'init_bounds': mapper_ckpt.get('init_bounds', mapper_cfg['init_bounds']),
                 'clip_value': mapper_ckpt.get('clip_value', mapper_cfg['clip_value']),
                 'temperature': mapper_ckpt.get('temperature', mapper_cfg['temperature']),
                 'delta': mapper_ckpt.get('delta', mapper_cfg['delta']),
@@ -107,6 +132,8 @@ def resolve_mapper_config(config_params, checkpoint_meta, args):
     if args.mapper_type != 'none':
         mapper_cfg['mapper_type'] = args.mapper_type
         mapper_cfg['constellation_size'] = args.constellation_size
+        mapper_cfg['levels_per_axis'] = args.mrc_levels_per_axis
+        mapper_cfg['init_bounds'] = args.mrc_init_bounds
         mapper_cfg['clip_value'] = args.mapper_clip_value
         mapper_cfg['temperature'] = args.mic_temperature
         mapper_cfg['delta'] = args.mic_delta
@@ -294,7 +321,7 @@ def config_parser():
     parser.add_argument('--inner_channel', default=None, type=int,
                         help='required for direct checkpoint eval if c cannot be parsed from name')
 
-    parser.add_argument('--mapper_type', default='none', type=str, choices=['none', 'mic'])
+    parser.add_argument('--mapper_type', default='none', type=str, choices=['none', 'mic', 'mrc'])
     parser.add_argument('--constellation_size', default=16, type=int)
     parser.add_argument('--mic_temperature', default=0.1, type=float)
     parser.add_argument('--mic_delta', default=None, type=float)

@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 
 from channel import Channel
-from constellation import MICLayer
+from constellation import MICLayer, MRCLayer
 
 """ def _image_normalization(norm_type):
     def _inner(tensor: torch.Tensor):
@@ -206,6 +206,10 @@ class DeepJSCC(nn.Module):
             self.mapper = MICLayer(**mapper_kwargs)
             self.mapper_type = 'mic'
             return
+        if mapper_type == 'mrc':
+            self.mapper = MRCLayer(**mapper_kwargs)
+            self.mapper_type = 'mrc'
+            return
 
         raise ValueError('Unknown mapper type: {}'.format(mapper_type))
 
@@ -236,6 +240,8 @@ class DeepJSCC(nn.Module):
         config = {
             'mapper_type': self.mapper_type,
             'constellation_size': getattr(self.mapper, 'constellation_size', None),
+            'levels_per_axis': getattr(self.mapper, 'levels_per_axis', None),
+            'init_bounds': getattr(self.mapper, 'init_bounds', None),
             'clip_value': getattr(self.mapper, 'clip_value', None),
             'temperature': getattr(self.mapper, 'temperature', None),
             'delta': getattr(self.mapper, 'delta', None),
